@@ -52,9 +52,9 @@ if st.button("Process All Invoices") and uploaded_files:
                 """
                 response = model.generate_content([prompt, pdf_data])
                 
-                # Bulletproof JSON Cleaning
-                clean_json = response.text.replace("```json", "").replace("
-```", "").strip()
+     # Clean the JSON response from the AI
+     clean_json = response.text.replace("```json", "").replace("```", "").strip()
+    data = json.loads(clean_json)
                 data = json.loads(clean_json)
                 
                 st.session_state.grand_report.append(data)
