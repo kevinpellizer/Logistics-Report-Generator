@@ -9,27 +9,27 @@ from io import BytesIO
 st.set_page_config(page_title="Logistics Auditor", layout="wide", page_icon="📊")
 api_key = os.environ.get("GEMINI_API_KEY")
 genai.configure(api_key=api_key)
-model = genai.GenerativeModel('gemini-1.5-flash') # Using 1.5-flash for high-speed data extraction
+model = genai.GenerativeModel('gemini-1.5-flash')
 
 st.title("📊 Logistics Financial Auditor")
-st.write("Upload your invoice to split costs by country and generate an Excel report.")
+st.write("Extracting line-by-line shipment data, grouping by country, and verifying totals.")
 
-# 2. Input
+# 2. File Upload
 uploaded_file = st.file_uploader("Upload Invoice (PDF or Image)", type=['pdf', 'png', 'jpg'])
 
 if uploaded_file:
-    if st.button("Analyze & Calculate Totals", type="primary"):
-        with st.spinner("Processing every shipment line-by-line..."):
+    if st.button("Run Full Audit & Generate Excel", type="primary"):
+        with st.spinner("Analyzing every shipment line-by-line..."):
             try:
-                # Instruction for the AI to be a data extractor
+                # The "Auditor" Prompt
                 prompt = """
-                Extract every single shipment from this document. 
-                For each shipment, identify:
+                Extract EVERY individual shipment from this document. 
+                For each shipment, find:
                 1. Tracking Number
-                2. Destination Country Code (e.g., DE, US, GB)
-                3. Net Cost (the price without VAT)
+                2. Destination Country Code (e.g., DE, FR, ES, NL, BE, AT, HR, CH, RO, FI, SI)
+                3. Net Cost (the price WITHOUT VAT)
 
-                Also, find the 'Invoice Net Total' (the sum of all shipments before VAT).
+                Also, find the 'Invoice Net Total' stated on the document (before VAT).
 
                 Return the data ONLY as a JSON object with this exact structure:
                 {
@@ -47,12 +47,14 @@ if uploaded_file:
                     {"mime_type": uploaded_file.type, "data": file_bytes}
                 ])
                 
-                # Clean and Parse JSON
-                raw_text = response.text.replace("```json", "").replace("
-```", "").strip()
-                data = json.loads(raw_text)
+                # Safer way to clean the JSON response
+                res_text = response.text
+                if "```json" in res_text:
+                    res_text = res_text.split("```json")[1].split("```")[0]
                 
-                # 3. Processing with Pandas (The Math)
+                data = json.loads(res_text.strip())
+                
+                # 3. The Math Engine (Pandas)
                 df = pd.DataFrame(data['shipments'])
                 
                 # Group by Country: Sum Cost and Count Shipments
@@ -66,31 +68,34 @@ if uploaded_file:
                 reported_total = data.get('invoice_net_total', 0)
 
                 # 5. Display Results
-                st.subheader("Country-Wise Breakdown")
+                st.divider()
+                st.subheader("🌍 Country-Wise Breakdown")
                 st.table(summary)
 
                 col1, col2 = st.columns(2)
-                col1.metric("Calculated Net Total", f"${calculated_total:,.2f}")
-                col2.metric("Invoice Reported Total", f"${reported_total:,.2f}")
+                col1.metric("Calculated Sum (All Items)", f"€{calculated_total:,.2f}")
+                col2.metric("Invoice Reported Net Total", f"€{reported_total:,.2f}")
 
-                if round(calculated_total, 2) == round(reported_total, 2):
-                    st.success("✅ Audit Passed: Calculated sum matches Invoice Net Total.")
+                # Check if the calculated sum matches the invoice total
+                if abs(calculated_total - reported_total) < 0.05:
+                    st.success("✅ Audit Passed: The sum of individual shipments matches the Net Total.")
                 else:
-                    st.warning("⚠️ Audit Discrepancy: The sum of line items differs from the reported total.")
+                    diff = abs(calculated_total - reported_total)
+                    st.warning(f"⚠️ Audit Discrepancy: There is a difference of €{diff:,.2f}.")
 
-                # 6. Excel Download Logic
+                # 6. Excel Download
                 output = BytesIO()
                 with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                    df.to_sheet(writer, index=False, sheet_name='All_Shipments')
-                    summary.to_sheet(writer, index=False, sheet_name='Country_Summary')
+                    df.to_excel(writer, index=False, sheet_name='All_Shipments')
+                    summary.to_excel(writer, index=False, sheet_name='Country_Summary')
                 
                 st.download_button(
-                    label="📥 Download Excel Report",
+                    label="📥 Download Audit Report (.xlsx)",
                     data=output.getvalue(),
                     file_name="logistics_audit_report.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
                 )
 
             except Exception as e:
-                st.error(f"Error processing data: {e}")
-                st.info("Check if the AI returned a non-JSON response. Try re-running.")
+                st.error(f"Error: {e}")
