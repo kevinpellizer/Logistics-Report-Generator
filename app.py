@@ -2,22 +2,23 @@ import streamlit as st
 import google.generativeai as genai
 import os
 
-# 1. Page Config
+# 1. Page Configuration
 st.set_page_config(page_title="Global Logistics Hub", layout="wide", page_icon="📦")
 
-# 2. Setup API - Using the Gemini 3 Flash model
+# 2. Setup API
 api_key = os.environ.get("GEMINI_API_KEY")
 genai.configure(api_key=api_key)
 
-# We are using 'gemini-3-flash' which is the standard for 2026
-model = genai.GenerativeModel('gemini-3-flash')
+# The missing "-preview" was the culprit!
+# If this still errors, change it to 'gemini-2.5-flash' (the stable version).
+model = genai.GenerativeModel('gemini-3-flash-preview')
 
 # 3. Sidebar
 with st.sidebar:
     st.title("Control Tower")
     st.info("System Online: Render-Host")
     st.divider()
-    st.write("This hub uses Gemini 3 AI to analyze logistics documents in real-time.")
+    st.write("Using Gemini 3 Flash Preview (May 2026 release).")
 
 # 4. Main Interface
 st.title("📦 Global Logistics & Courier Hub")
@@ -36,27 +37,29 @@ with col2:
 
 if run_btn:
     if tracking_input or uploaded_file:
-        with st.spinner("Gemini 3 is analyzing data streams..."):
+        with st.spinner("Gemini 3 is analyzing your document..."):
             try:
-                # Prepare the content list for the AI
-                content_to_send = [f"Perform a {analysis_type}. Logistics data: {tracking_input}"]
+                # We build the request as a list of parts
+                prompt_text = f"Perform a {analysis_type}. Logistics data provided: {tracking_input}"
+                request_content = [prompt_text]
                 
-                # If a file is uploaded, add it to the request
                 if uploaded_file:
-                    file_data = uploaded_file.read()
-                    content_to_send.append({
+                    # We use .getvalue() to get the clean data for the API
+                    file_bytes = uploaded_file.getvalue()
+                    request_content.append({
                         "mime_type": uploaded_file.type,
-                        "data": file_data
+                        "data": file_bytes
                     })
                 
                 # Generate response
-                response = model.generate_content(content_to_send)
+                response = model.generate_content(request_content)
                 
                 st.divider()
                 st.success("Analysis Complete")
                 st.markdown(response.text)
                 
             except Exception as e:
+                # This will tell us if it's still a 404 or something else
                 st.error(f"Analysis failed: {e}")
     else:
-        st.warning("Please provide a tracking ID or upload a file.")
+        st.warning("Please provide data or a file to analyze.")
