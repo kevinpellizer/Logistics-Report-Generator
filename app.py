@@ -27,7 +27,7 @@ if uploaded_files:
         for i, uploaded_file in enumerate(uploaded_files):
             with st.spinner(f"Processing: {uploaded_file.name}..."):
                 try:
-                   # --- THE NEW UNIVERSAL VAT-FREE PROMPT ---
+                    # --- THE NEW UNIVERSAL VAT-FREE PROMPT ---
                     p = "Extract every shipment line-by-line. Use ONLY these keys: 'tracking_nr', 'country', 'cost'. "
                     p += "The 'country' MUST be the 2-letter destination code. "
                     p += "CRITICAL FOR COST: The 'cost' MUST be the TOTAL NET AMOUNT for that specific shipment. "
@@ -50,9 +50,9 @@ if uploaded_files:
                     all_shipments.extend(shipments)
                     total_reported_net += float(data.get('invoice_net_total', 0))
                     
-                    # Anti-Spam Pause
+                    # --- THE ANTI-SPAM PAUSE ---
                     if i < len(uploaded_files) - 1:
-                        time.sleep(5) 
+                        time.sleep(15) 
                         
                 except Exception as e:
                     if "429" in str(e):
@@ -75,7 +75,7 @@ if uploaded_files:
                 st.subheader("🌍 Combined Results (VAT Free)")
                 st.table(summary)
                 
-                # --- NEW: THE MATH DOUBLE-CHECK ---
+                # --- THE MATH DOUBLE-CHECK ---
                 calc_sum = df['cost'].sum()
                 difference = abs(calc_sum - total_reported_net)
                 
