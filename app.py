@@ -6,71 +6,79 @@ import json
 from io import BytesIO
 
 # 1. Setup
-st.set_page_config(page_title="Logistics Auditor", layout="wide", page_icon="📊")
+st.set_page_config(page_title="Multi-Invoice Auditor", layout="wide", page_icon="📊")
 api_key = os.environ.get("GEMINI_API_KEY")
 genai.configure(api_key=api_key)
 model = genai.GenerativeModel('gemini-3-flash-preview')
 
-st.title("📊 Logistics Financial Auditor")
+st.title("📊 Multi-Invoice Financial Auditor")
 
-# 2. File Upload
-uploaded_file = st.file_uploader("Upload Invoice", type=['pdf', 'png', 'jpg'])
+# 2. Multiple File Upload
+uploaded_files = st.file_uploader("Upload DHL Invoices (Multiple allowed)", type=['pdf', 'png', 'jpg'], accept_multiple_files=True)
 
-if uploaded_file:
-    if st.button("Run Full Audit", type="primary"):
-        with st.spinner("Gemini 3 is extracting data..."):
-            try:
-                # Forceful Prompt
-                p = "Extract every shipment. Use ONLY these keys: 'tracking_nr', 'country', 'cost'. "
-                p += "The 'country' MUST be the 2-letter code (DE, FR, etc). "
-                p += "Also find 'invoice_net_total'. Return as JSON."
-                
-                fb = uploaded_file.getvalue()
-                response = model.generate_content([p, {"mime_type": uploaded_file.type, "data": fb}])
-                
-                # Cleaning
-                raw = response.text.replace("```json", "").replace("```", "").strip()
-                data = json.loads(raw)
-                
-                # Create DataFrame
-                df = pd.DataFrame(data['shipments'])
-
-                # --- NEW: SAFETY CHECK FOR COLUMNS ---
-                if not df.empty:
-                    # If AI used different capitalization, fix it
-                    df.columns = [c.lower() for c in df.columns]
+if uploaded_files:
+    if st.button(f"Analyze {len(uploaded_files)} Invoices", type="primary"):
+        all_shipments = []
+        total_reported_net = 0.0
+        
+        progress_bar = st.progress(0)
+        
+        for i, uploaded_file in enumerate(uploaded_files):
+            with st.spinner(f"Processing: {uploaded_file.name}..."):
+                try:
+                    p = "Extract every shipment. Keys: 'tracking_nr', 'country', 'cost'. "
+                    p += "Also find 'invoice_net_total'. Return ONLY JSON."
                     
-                    if 'country' in df.columns and 'cost' in df.columns:
-                        # Success - Do the math
-                        summary = df.groupby('country').agg(
-                            Total_Cost=('cost', 'sum'),
-                            Count=('cost', 'count')
-                        ).reset_index()
+                    fb = uploaded_file.getvalue()
+                    response = model.generate_content([p, {"mime_type": uploaded_file.type, "data": fb}])
+                    
+                    # Clean & Parse
+                    raw = response.text.replace("```json", "").replace("```", "").strip()
+                    data = json.loads(raw)
+                    
+                    # Store data
+                    shipments = data.get('shipments', [])
+                    for s in shipments:
+                        s['source_file'] = uploaded_file.name # Keep track of which file it came from
+                    
+                    all_shipments.extend(shipments)
+                    total_reported_net += float(data.get('invoice_net_total', 0))
+                    
+                except Exception as e:
+                    st.error(f"Error in {uploaded_file.name}: {e}")
+            
+            progress_bar.progress((i + 1) / len(uploaded_files))
 
-                        st.subheader("🌍 Results by Country")
-                        st.table(summary)
-                        
-                        calc_total = df['cost'].sum()
-                        rep_total = data.get('invoice_net_total', 0)
-                        
-                        col1, col2 = st.columns(2)
-                        col1.metric("Calculated Sum", f"€{calc_total:,.2f}")
-                        col2.metric("Invoice Net Total", f"€{rep_total:,.2f}")
+        if all_shipments:
+            df = pd.DataFrame(all_shipments)
+            df.columns = [c.lower() for c in df.columns]
 
-                        # Excel Logic
-                        out = BytesIO()
-                        with pd.ExcelWriter(out, engine='openpyxl') as writer:
-                            df.to_excel(writer, index=False, sheet_name='All_Shipments')
-                            summary.to_excel(writer, index=False, sheet_name='Summary')
-                        
-                        st.download_button("📥 Download Excel Report", out.getvalue(), 
-                                         "audit_report.xlsx", 
-                                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-                    else:
-                        st.error(f"Missing columns. AI found: {list(df.columns)}")
-                        st.write("Raw data extracted:", df)
-                else:
-                    st.warning("AI didn't find any shipments in this document.")
+            # Grouping
+            summary = df.groupby('country')['cost'].sum().reset_index()
+            
+            # --- NEW: Transpose for the Excel layout you want (Row 1: Country, Row 2: Cost) ---
+            transposed_summary = summary.set_index('country').T
 
-            except Exception as e:
-                st.error(f"Processing Error: {e}")
+            st.subheader("🌍 Combined Results by Country")
+            st.table(summary)
+            
+            calc_sum = df['cost'].sum()
+            st.metric("Total Calculated (All Files)", f"€{calc_sum:,.2f}")
+            st.metric("Total Reported on Invoices", f"€{total_reported_net:,.2f}")
+
+            # 3. Excel Download Logic
+            out = BytesIO()
+            with pd.ExcelWriter(out, engine='openpyxl') as writer:
+                # Sheet 1: Raw Data
+                df.to_excel(writer, index=False, sheet_name='All_Shipments')
+                # Sheet 2: Your specific Row 1 (Country) / Row 2 (Cost) layout
+                transposed_summary.to_excel(writer, sheet_name='Country_Summary')
+            
+            st.divider()
+            st.download_button(
+                label="📥 Download Consolidated Excel Report",
+                data=out.getvalue(),
+                file_name="consolidated_audit_report.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
