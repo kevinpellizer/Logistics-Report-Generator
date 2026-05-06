@@ -27,11 +27,13 @@ if uploaded_files:
         for i, uploaded_file in enumerate(uploaded_files):
             with st.spinner(f"Processing: {uploaded_file.name}..."):
                 try:
-                    # --- THE NEW VAT-FREE PROMPT ---
+                   # --- THE NEW UNIVERSAL VAT-FREE PROMPT ---
                     p = "Extract every shipment line-by-line. Use ONLY these keys: 'tracking_nr', 'country', 'cost'. "
                     p += "The 'country' MUST be the 2-letter destination code. "
-                    p += "CRITICAL FOR COST: The 'cost' MUST be the NET amount (VAT FREE / brez DDV). "
-                    p += "Include standard costs and surcharges, but STRICTLY EXCLUDE any VAT/Tax/DDV. "
+                    p += "CRITICAL FOR COST: The 'cost' MUST be the TOTAL NET AMOUNT for that specific shipment. "
+                    p += "You must ADD the base shipping rate PLUS all surcharges (fuel, remote area, handling, tolls, etc.) for that row. "
+                    p += "The invoice might be in English, Slovenian, German, or other languages. Understand the context of the columns. "
+                    p += "STRICTLY EXCLUDE any VAT / DDV / Tax from your math. Give me only the final net cost per shipment. "
                     p += "Also find the total net invoice amount ('invoice_net_total'). Return as ONLY a JSON object."
                     
                     fb = uploaded_file.getvalue()
