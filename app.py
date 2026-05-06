@@ -14,7 +14,7 @@ model = genai.GenerativeModel('gemini-3-flash-preview')
 st.title("📊 Multi-Invoice Financial Auditor")
 
 # 2. Multiple File Upload
-uploaded_files = st.file_uploader("Upload DHL Invoices (Multiple allowed)", type=['pdf', 'png', 'jpg'], accept_multiple_files=True)
+uploaded_files = st.file_uploader("Upload Courier Invoices (Multiple allowed)", type=['pdf', 'png', 'jpg'], accept_multiple_files=True)
 
 if uploaded_files:
     if st.button(f"Analyze {len(uploaded_files)} Invoices", type="primary"):
