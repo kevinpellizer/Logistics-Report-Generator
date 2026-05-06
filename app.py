@@ -3,6 +3,7 @@ import google.generativeai as genai
 import os
 import pandas as pd
 import json
+import time  
 from io import BytesIO
 
 # 1. Setup
@@ -26,59 +27,78 @@ if uploaded_files:
         for i, uploaded_file in enumerate(uploaded_files):
             with st.spinner(f"Processing: {uploaded_file.name}..."):
                 try:
-                    p = "Extract every shipment. Keys: 'tracking_nr', 'country', 'cost'. "
-                    p += "Also find 'invoice_net_total'. Return ONLY JSON."
+                    # --- THE NEW VAT-FREE PROMPT ---
+                    p = "Extract every shipment line-by-line. Use ONLY these keys: 'tracking_nr', 'country', 'cost'. "
+                    p += "The 'country' MUST be the 2-letter destination code. "
+                    p += "CRITICAL FOR COST: The 'cost' MUST be the NET amount (VAT FREE / brez DDV). "
+                    p += "Include standard costs and surcharges, but STRICTLY EXCLUDE any VAT/Tax/DDV. "
+                    p += "Also find the total net invoice amount ('invoice_net_total'). Return as ONLY a JSON object."
                     
                     fb = uploaded_file.getvalue()
                     response = model.generate_content([p, {"mime_type": uploaded_file.type, "data": fb}])
                     
-                    # Clean & Parse
+                    # Cleaning
                     raw = response.text.replace("```json", "").replace("```", "").strip()
                     data = json.loads(raw)
                     
-                    # Store data
                     shipments = data.get('shipments', [])
                     for s in shipments:
-                        s['source_file'] = uploaded_file.name # Keep track of which file it came from
+                        s['source_file'] = uploaded_file.name 
                     
                     all_shipments.extend(shipments)
                     total_reported_net += float(data.get('invoice_net_total', 0))
                     
+                    # Anti-Spam Pause
+                    if i < len(uploaded_files) - 1:
+                        time.sleep(5) 
+                        
                 except Exception as e:
-                    st.error(f"Error in {uploaded_file.name}: {e}")
+                    if "429" in str(e):
+                        st.error(f"Google Rate Limit hit on {uploaded_file.name}. Too many files too fast.")
+                    else:
+                        st.error(f"Error on {uploaded_file.name}: {e}")
             
             progress_bar.progress((i + 1) / len(uploaded_files))
 
+        # 3. Processing Combined Data
         if all_shipments:
             df = pd.DataFrame(all_shipments)
             df.columns = [c.lower() for c in df.columns]
 
-            # Grouping
-            summary = df.groupby('country')['cost'].sum().reset_index()
-            
-            # --- NEW: Transpose for the Excel layout you want (Row 1: Country, Row 2: Cost) ---
-            transposed_summary = summary.set_index('country').T
+            if 'country' in df.columns and 'cost' in df.columns:
+                # Grouping
+                summary = df.groupby('country')['cost'].sum().reset_index()
+                transposed_summary = summary.set_index('country').T
 
-            st.subheader("🌍 Combined Results by Country")
-            st.table(summary)
-            
-            calc_sum = df['cost'].sum()
-            st.metric("Total Calculated (All Files)", f"€{calc_sum:,.2f}")
-            st.metric("Total Reported on Invoices", f"€{total_reported_net:,.2f}")
+                st.subheader("🌍 Combined Results (VAT Free)")
+                st.table(summary)
+                
+                # --- NEW: THE MATH DOUBLE-CHECK ---
+                calc_sum = df['cost'].sum()
+                difference = abs(calc_sum - total_reported_net)
+                
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Calculated Sum (Shipments)", f"€{calc_sum:,.2f}")
+                col2.metric("Reported Net Total (Invoice)", f"€{total_reported_net:,.2f}")
+                
+                if difference <= 0.10: # We allow a 10-cent difference for rounding math
+                    col3.metric("Reconciliation", "✅ Match")
+                    st.success("Audit verification passed! The individual shipments perfectly match the invoice total.")
+                else:
+                    col3.metric("Reconciliation", "⚠️ Discrepancy")
+                    st.warning(f"Discrepancy of €{difference:,.2f} detected! The AI may have accidentally included VAT on a row, or a surcharge was misread. Please review the Excel export.")
 
-            # 3. Excel Download Logic
-            out = BytesIO()
-            with pd.ExcelWriter(out, engine='openpyxl') as writer:
-                # Sheet 1: Raw Data
-                df.to_excel(writer, index=False, sheet_name='All_Shipments')
-                # Sheet 2: Your specific Row 1 (Country) / Row 2 (Cost) layout
-                transposed_summary.to_excel(writer, sheet_name='Country_Summary')
-            
-            st.divider()
-            st.download_button(
-                label="📥 Download Consolidated Excel Report",
-                data=out.getvalue(),
-                file_name="consolidated_audit_report.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True
-            )
+                # Excel Logic
+                out = BytesIO()
+                with pd.ExcelWriter(out, engine='openpyxl') as writer:
+                    df.to_excel(writer, index=False, sheet_name='All_Shipments')
+                    transposed_summary.to_excel(writer, sheet_name='Country_Summary')
+                
+                st.divider()
+                st.download_button(
+                    label="📥 Download Verified Excel",
+                    data=out.getvalue(),
+                    file_name="verified_audit.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
